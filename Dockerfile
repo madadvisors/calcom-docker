@@ -32,9 +32,6 @@ ENV NEXT_PUBLIC_WEBAPP_URL=http://localhost:3000 \
 ENV NODE_ENV=production \
     NODE_OPTIONS=--max-old-space-size=${MAX_OLD_SPACE_SIZE}  
 
-COPY --link . .
-
-# align turbo with package.json version
 RUN TURBO_VERSION=$(cat package.json | jq '.dependencies["turbo"]' -r) npm i -g turbo@${TURBO_VERSION}
 
 RUN yarn config set httpTimeout 1200000 && \ 
