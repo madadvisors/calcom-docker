@@ -1,82 +1,96 @@
-FROM node:18-alpine AS base
+FROM node:18-slim as base
 
-FROM base AS builder
-RUN apk add --no-cache libc6-compat
-RUN apk update
-# Set working directory
-WORKDIR /app
-RUN yarn global add turbo
-COPY calcom/. .
-RUN turbo prune @calcom/web --docker
+RUN set -eux; \
+    apt-get update -qq && \
+    apt-get install -y build-essential openssl pkg-config python-is-python3 jq git  && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives 
 
-# Add lockfile and package.json's of isolated subworkspace
-FROM base AS installer
+#############################################
+FROM base as builder
 
-ARG NEXT_PUBLIC_LICENSE_CONSENT
-ARG CALCOM_TELEMETRY_DISABLED
-ARG DATABASE_URL
-ARG NEXTAUTH_SECRET=secret
-ARG NEXT_PUBLIC_API_V2_URL
-ARG CALENDSO_ENCRYPTION_KEY=secret
-ARG MAX_OLD_SPACE_SIZE=8192
-ARG NEXT_PUBLIC_WEBAPP_URL
-ARG NEXT_PUBLIC_SENTRY_DSN
-
-ENV NEXT_PUBLIC_WEBAPP_URL=$NEXT_PUBLIC_WEBAPP_URL \
-    NEXT_PUBLIC_LICENSE_CONSENT=$NEXT_PUBLIC_LICENSE_CONSENT \
-    CALCOM_TELEMETRY_DISABLED=$CALCOM_TELEMETRY_DISABLED \
-    DATABASE_URL=$DATABASE_URL \
-    DATABASE_DIRECT_URL=$DATABASE_URL \
-    NEXTAUTH_SECRET=${NEXTAUTH_SECRET} \
-    NEXT_PUBLIC_API_V2_URL=${NEXT_PUBLIC_API_V2_URL} \
-    CALENDSO_ENCRYPTION_KEY=${CALENDSO_ENCRYPTION_KEY} \
-    NODE_OPTIONS=--max-old-space-size=${MAX_OLD_SPACE_SIZE} \
-    NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN}
-
-RUN apk add --no-cache libc6-compat
-RUN apk update
 WORKDIR /app
 
-# First install the dependencies (as they change less often)
-COPY .gitignore .gitignore
-COPY --from=builder /app/out/json/ .
-COPY --from=builder /app/out/yarn.lock ./yarn.lock
+# Disables some well-known postinstall scripts
+ENV PRISMA_SKIP_POSTINSTALL_GENERATE=true \
+    HUSKY=0
 
-# app-store packages aren't explicitly required but need to be available
-COPY calcom/packages ./packages
+ENV NEXT_BUILD_ENV_OUTPUT=standalone
 
-RUN yarn install
+ENV NEXT_PUBLIC_WEBAPP_URL=http://localhost:3000 \
+    NEXT_PUBLIC_API_V2_URL=http://localhost:5555/api/v2 \
+    NEXTAUTH_URL=${NEXT_PUBLIC_WEBAPP_URL}/api/auth \
+    NEXTAUTH_SECRET=auth_secret \
+    CALENDSO_ENCRYPTION_KEY=encyrption_secret \
+    NEXT_PUBLIC_LICENSE_CONSENT=$NEXT_PUBLIC_LICENSE_CONSENT_PLACEHOLDER \
+    CALCOM_TELEMETRY_DISABLED=$CALCOM_TELEMETRY_DISABLED_PLACEHOLDER \
+    MAX_OLD_SPACE_SIZE=4096 
 
-# Build the project
-COPY --from=builder /app/out/full/ .
+ENV NODE_ENV=production \
+    NODE_OPTIONS=--max-old-space-size=${MAX_OLD_SPACE_SIZE}  
 
-# Disable linting and type checking in the next build
-ENV CI=1
+COPY --link . .
 
-RUN yarn turbo run build --filter=@calcom/web...
-# RUN yarn --cwd packages/embeds/embed-core workspace @calcom/embed-core run build
+# align turbo with package.json version
+RUN TURBO_VERSION=$(cat package.json | jq '.dependencies["turbo"]' -r) npm i -g turbo@${TURBO_VERSION}
 
-FROM base AS runner
+RUN yarn config set httpTimeout 1200000 && \ 
+    turbo prune --scope=@calcom/web --docker && \
+    yarn && \
+    turbo run build --filter=@calcom/web...  && \
+    rm -rf node_modules/.cache .yarn/cache apps/web/.next/cache
+
+
+#############################################
+FROM base as unit-test
+
 WORKDIR /app
 
-# Don't run production as root
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
-USER nextjs
+COPY  --from=builder /app/. ./
 
-COPY --from=installer /app/apps/web/next.config.js .
-COPY --from=installer /app/apps/web/package.json .
+RUN yarn test
 
 
-# Automatically leverage output traces to reduce image size
-# https://nextjs.org/docs/advanced-features/output-file-tracing
-COPY --from=installer --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
-COPY --from=installer --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
-COPY --from=installer --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
+#############################################
+FROM node:18-slim as runner
 
-RUN yarn global add prisma
-COPY calcom/packages/prisma/migrations/. ./prisma/migrations
-COPY calcom/packages/prisma/schema.prisma ./prisma/schema.prisma
+# Install packages needed for deployment
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y openssl jq curl bash && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
-# TODO: Consider adding seeding script here
+WORKDIR /app
+
+# chown to node default user/group
+COPY  --from=builder --chown=node:node  /app/apps/web/next.config.js \
+                    /app/apps/web/next-i18next.config.js \
+                    /app/apps/web/package.json \
+                    ./
+
+# automatically leverage outputfiletracing to reduce image size
+COPY  --from=builder --chown=node:node  /app/apps/web/.next/standalone ./
+COPY  --from=builder --chown=node:node  /app/apps/web/.next/static ./apps/web/.next/static
+COPY  --from=builder --chown=node:node  /app/apps/web/public ./apps/web/public
+
+# # prisma schema to be loaded at runtime with dependency
+RUN PRISMA_CLIENT_VERSION=$(cat packages/prisma/package.json | jq '.dependencies["@prisma/client"]' -r) npm i -g @prisma/client@${PRISMA_CLIENT_VERSION} && \
+    PRISMA_VERSION=$(cat packages/prisma/package.json | jq '.dependencies["prisma"]' -r) npm i -g prisma@${PRISMA_VERSION}
+
+COPY  --from=builder --chown=node:node /app/packages/prisma /app/packages/prisma
+
+# entrypoint scripts
+COPY --chown=node:node infra/docker/web/scripts ./
+RUN ["chmod", "+x", "./replace-placeholder.sh"] 
+
+USER node
+
+ENTRYPOINT ["/bin/bash", "./replace-placeholder.sh"]
+
+
+# enables standalone access to api route endpoints by changing the inline "localhost"
+# in server.js to "0.0.0.0"
+ENV HOSTNAME=0.0.0.0
+ENV PORT=${NEXTJS_PORT:-3000}
+EXPOSE ${PORT}
+
 CMD ["sh", "-c", "$(yarn global bin)/prisma migrate deploy --schema=prisma/schema.prisma && node apps/web/server.js"]
