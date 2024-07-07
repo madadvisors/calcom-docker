@@ -40,17 +40,6 @@ RUN yarn config set httpTimeout 1200000 && \
     turbo run build --filter=@calcom/web...  && \
     rm -rf node_modules/.cache .yarn/cache apps/web/.next/cache
 
-
-#############################################
-FROM base as unit-test
-
-WORKDIR /app
-
-COPY  --from=builder /app/. ./
-
-RUN yarn test
-
-
 #############################################
 FROM node:18-slim as runner
 
@@ -73,8 +62,8 @@ COPY  --from=builder --chown=node:node  /app/apps/web/.next/static ./apps/web/.n
 COPY  --from=builder --chown=node:node  /app/apps/web/public ./apps/web/public
 
 # # prisma schema to be loaded at runtime with dependency
-RUN PRISMA_CLIENT_VERSION=$(cat packages/prisma/package.json | jq '.dependencies["@prisma/client"]' -r) npm i -g @prisma/client@${PRISMA_CLIENT_VERSION} && \
-    PRISMA_VERSION=$(cat packages/prisma/package.json | jq '.dependencies["prisma"]' -r) npm i -g prisma@${PRISMA_VERSION}
+RUN PRISMA_CLIENT_VERSION=^1.10.1 npm i -g @prisma/client@${PRISMA_CLIENT_VERSION} && \
+    PRISMA_VERSION=^5.4.2 npm i -g prisma@${PRISMA_VERSION}
 
 COPY  --from=builder --chown=node:node /app/packages/prisma /app/packages/prisma
 
