@@ -7,9 +7,14 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists /var/cache/apt/archives 
 
 #############################################
-FROM base as builder
+FROM base AS builder
+RUN apk add --no-cache libc6-compat
+RUN apk update
 
 WORKDIR /app
+RUN yarn global add turbo
+COPY calcom/. .
+RUN turbo prune @calcom/web --docker
 
 # Disables some well-known postinstall scripts
 ENV PRISMA_SKIP_POSTINSTALL_GENERATE=true \
