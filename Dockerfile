@@ -32,7 +32,7 @@ ENV NEXT_PUBLIC_WEBAPP_URL=http://localhost:3000 \
 ENV NODE_ENV=production \
     NODE_OPTIONS=--max-old-space-size=${MAX_OLD_SPACE_SIZE}  
 
-RUN TURBO_VERSION=$(cat package.json | jq '.dependencies["turbo"]' -r) npm i -g turbo@${TURBO_VERSION}
+RUN TURBO_VERSION=^1.10.1 npm i -g turbo@${TURBO_VERSION}
 
 RUN yarn config set httpTimeout 1200000 && \ 
     turbo prune --scope=@calcom/web --docker && \
