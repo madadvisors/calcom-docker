@@ -8,8 +8,6 @@ RUN set -eux; \
 
 #############################################
 FROM base AS builder
-RUN apk add --no-cache libc6-compat
-RUN apk update
 
 WORKDIR /app
 RUN yarn global add turbo
