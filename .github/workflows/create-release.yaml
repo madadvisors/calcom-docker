@@ -38,7 +38,7 @@ jobs:
       - name: "Create release"
         uses: "actions/github-script@v6"
         with:
-          github-token: "${{ secrets.ACTIONS_ACCESS_TOKEN }}"
+          github-token: "${{ secrets.GTOKEN }}"
           script: |
             const isPreRelease = '${{ inputs.RELEASE_TAG }}'.includes('-rc'); 
             try {
