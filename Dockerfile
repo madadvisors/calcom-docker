@@ -33,7 +33,7 @@ ENV NODE_ENV=production \
     NODE_OPTIONS=--max-old-space-size=${MAX_OLD_SPACE_SIZE}  
 
 # RUN TURBO_VERSION='1.10.1' npm i -g turbo@${TURBO_VERSION}
-
+RUN yarn global add turbo
 RUN yarn config set httpTimeout 1200000 && \ 
     turbo prune --scope=@calcom/web --docker && \
     yarn && \
@@ -65,6 +65,7 @@ COPY  --from=builder --chown=node:node  /app/apps/web/public ./apps/web/public
 # RUN PRISMA_CLIENT_VERSION='1.10.1' npm i -g @prisma/client@${PRISMA_CLIENT_VERSION} && \
 #     PRISMA_VERSION='5.4.2' npm i -g prisma@${PRISMA_VERSION}
 
+RUN yarn global add prisma
 COPY  --from=builder --chown=node:node /app/packages/prisma /app/packages/prisma
 
 USER node
