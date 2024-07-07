@@ -83,14 +83,7 @@ RUN PRISMA_CLIENT_VERSION=$(cat packages/prisma/package.json | jq '.dependencies
 
 COPY  --from=builder --chown=node:node /app/packages/prisma /app/packages/prisma
 
-# entrypoint scripts
-COPY --chown=node:node infra/docker/web/scripts ./
-RUN ["chmod", "+x", "./replace-placeholder.sh"] 
-
 USER node
-
-ENTRYPOINT ["/bin/bash", "./replace-placeholder.sh"]
-
 
 # enables standalone access to api route endpoints by changing the inline "localhost"
 # in server.js to "0.0.0.0"
